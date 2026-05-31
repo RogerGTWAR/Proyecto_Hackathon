@@ -18,12 +18,18 @@ export class AuthService {
   ) {}
 
   private sanitizeUser(user: any) {
-    const { password, ...safeUser } = user;
+    const { passwordHash, password, ...safeUser } = user;
     return safeUser;
   }
 
   async register(registerDto: RegisterDto) {
-    return this.usersService.create(registerDto);
+    const user = await this.usersService.create(registerDto);
+
+    return {
+      ok: true,
+      msg: 'Usuario registrado correctamente',
+      user,
+    };
   }
 
   async login(loginDto: LoginDto) {
@@ -41,7 +47,7 @@ export class AuthService {
 
     const isPasswordValid = await bcrypt.compare(
       loginDto.password,
-      user.password,
+      user.passwordHash,
     );
 
     if (!isPasswordValid) {
@@ -52,8 +58,8 @@ export class AuthService {
       sub: user.userId,
       userId: user.userId,
       email: user.email,
-      rol: user.rol,
-      name: user.name,
+      roles: user.roles,
+      fullName: user.fullName,
     };
 
     const accessToken = await this.jwtService.signAsync(payload);
@@ -67,7 +73,7 @@ export class AuthService {
   }
 
   async me(userId: number) {
-    const user = await this.usersService.findOneEntity(userId);
+    const user = await this.usersService.findOne(userId);
 
     return {
       ok: true,

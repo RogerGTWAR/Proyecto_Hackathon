@@ -6,7 +6,7 @@ export class CreateFavoriteDto {
   @Type(() => Number)
   userId!: number;
 
-  @IsInt({ message: 'El providerId debe ser un número entero' })
+  @IsInt({ message: 'El workerId debe ser un número entero' })
   @Type(() => Number)
-  providerId!: number;
+  workerId!: number;
 }

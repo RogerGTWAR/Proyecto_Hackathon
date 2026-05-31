@@ -1,16 +1,18 @@
 import {
+  IsBoolean,
   IsIn,
   IsInt,
   IsNotEmpty,
+  IsOptional,
   IsString,
   Matches,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
-export class CreateProviderScheduleDto {
-  @IsInt({ message: 'El providerId debe ser un número entero' })
+export class CreateWorkerScheduleDto {
+  @IsInt({ message: 'El workerId debe ser un número entero' })
   @Type(() => Number)
-  providerId!: number;
+  workerId!: number;
 
   @IsString()
   @IsNotEmpty({ message: 'El día es obligatorio' })
@@ -29,7 +31,7 @@ export class CreateProviderScheduleDto {
         'El día debe ser: lunes, martes, miércoles, jueves, viernes, sábado o domingo',
     },
   )
-  day!: string;
+  dayOfWeek!: string;
 
   @IsString()
   @Matches(/^([01]\d|2[0-3]):([0-5]\d)$/, {
@@ -42,4 +44,8 @@ export class CreateProviderScheduleDto {
     message: 'La hora final debe tener formato HH:mm. Ejemplo: 17:00',
   })
   endTime!: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
 }

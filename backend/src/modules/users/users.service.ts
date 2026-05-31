@@ -1,17 +1,21 @@
 import {
-  BadRequestException,
+  ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Not, Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
+import { IsNull, Repository } from 'typeorm';
 
-import { User } from './entities/user.entity';
+import {
+  IdentificationType,
+  User,
+  UserRole,
+} from './entities/user.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
-
-const SALT_ROUNDS = 10;
+import { UserResponseDto } from './dto/user-response.dto';
 
 @Injectable()
 export class UsersService {
@@ -20,80 +24,92 @@ export class UsersService {
     private readonly usersRepository: Repository<User>,
   ) {}
 
-  private sanitizeUser(user: User) {
-    const { password, ...safeUser } = user as any;
-    return safeUser;
-  }
-
-  async create(createUserDto: CreateUserDto) {
+  async create(createUserDto: CreateUserDto): Promise<UserResponseDto> {
     const email = createUserDto.email.trim().toLowerCase();
 
-    const exists = await this.usersRepository.findOne({
+    const identificationNumber = this.normalizeIdentification(
+      createUserDto.identificationNumber,
+    );
+
+    const emailExists = await this.usersRepository.findOne({
       where: { email },
-      withDeleted: true,
     });
 
-    if (exists && exists.deletedAt === null) {
-      throw new BadRequestException('El correo ya está registrado');
+    if (emailExists) {
+      throw new ConflictException('El correo ya está registrado');
     }
 
-    if (exists && exists.deletedAt !== null) {
-      throw new BadRequestException(
-        'Este correo pertenece a un usuario eliminado. Restaura el usuario o usa otro correo.',
-      );
+    const identificationExists = await this.usersRepository.findOne({
+      where: { identificationNumber },
+    });
+
+    if (identificationExists) {
+      throw new ConflictException('La identificación ya está registrada');
     }
 
-    const hashedPassword = await bcrypt.hash(
-      createUserDto.password,
-      SALT_ROUNDS,
-    );
+    const passwordHash = await bcrypt.hash(createUserDto.password, 10);
 
     const user = this.usersRepository.create({
       email,
-      number: createUserDto.number ?? null,
-      password: hashedPassword,
-      rol: createUserDto.rol,
-      name: createUserDto.name,
-      image: createUserDto.image ?? null,
+      phone: createUserDto.phone ?? null,
+      identificationType:
+        createUserDto.identificationType ?? IdentificationType.CEDULA,
+      identificationNumber,
+      passwordHash,
+      roles: createUserDto.roles ?? [UserRole.CLIENT],
+      fullName: createUserDto.fullName.trim(),
+      profileImage: createUserDto.profileImage ?? null,
       isVerified: createUserDto.isVerified ?? false,
       isActive: createUserDto.isActive ?? true,
     });
 
     const savedUser = await this.usersRepository.save(user);
 
-    return {
-      ok: true,
-      msg: 'Usuario creado correctamente',
-      user: this.sanitizeUser(savedUser),
-    };
+    return this.toResponseDto(savedUser);
   }
 
-  async findAll() {
+  async findAll(currentUser: any): Promise<UserResponseDto[]> {
+    this.validateAdmin(currentUser);
+
     const users = await this.usersRepository.find({
       where: {
         deletedAt: IsNull(),
       },
       order: {
-        userId: 'DESC',
+        userId: 'ASC',
       },
     });
 
-    return {
-      ok: true,
-      users,
-    };
+    return users.map((user) => this.toResponseDto(user));
   }
 
-  async findOne(userId: number) {
+  async findDeleted(currentUser: any): Promise<UserResponseDto[]> {
+    this.validateAdmin(currentUser);
+
+    const users = await this.usersRepository
+      .createQueryBuilder('user')
+      .withDeleted()
+      .where('user.deleted_at IS NOT NULL')
+      .orderBy('user.user_id', 'ASC')
+      .getMany();
+
+    return users.map((user) => this.toResponseDto(user));
+  }
+
+  async findOne(
+    userId: number,
+    currentUser?: any,
+  ): Promise<UserResponseDto> {
     const user = await this.findOneEntity(userId);
 
-    return {
-      ok: true,
-      user,
-    };
+    if (currentUser) {
+      this.validateUserOwner(user.userId, currentUser);
+    }
+
+    return this.toResponseDto(user);
   }
 
-  async findOneEntity(userId: number) {
+  async findOneEntity(userId: number): Promise<User> {
     const user = await this.usersRepository.findOne({
       where: {
         userId,
@@ -108,87 +124,159 @@ export class UsersService {
     return user;
   }
 
-  async findByEmailWithPassword(email: string) {
+  async findEntityById(userId: number): Promise<User> {
+    return this.findOneEntity(userId);
+  }
+
+  async findByEmailWithPassword(email: string): Promise<User | null> {
     return this.usersRepository
       .createQueryBuilder('user')
-      .addSelect('user.password')
+      .addSelect('user.passwordHash')
       .where('LOWER(user.email) = LOWER(:email)', { email })
       .andWhere('user.deleted_at IS NULL')
       .getOne();
   }
 
-  async update(userId: number, updateUserDto: UpdateUserDto) {
-    const user = await this.findOneEntity(userId);
+  async update(
+    userId: number,
+    updateUserDto: UpdateUserDto,
+    currentUser?: any,
+  ): Promise<UserResponseDto> {
+    const user = await this.usersRepository
+      .createQueryBuilder('user')
+      .addSelect('user.passwordHash')
+      .where('user.user_id = :userId', { userId })
+      .andWhere('user.deleted_at IS NULL')
+      .getOne();
 
-    if (updateUserDto.email) {
-      const email = updateUserDto.email.trim().toLowerCase();
+    if (!user) {
+      throw new NotFoundException('Usuario no encontrado');
+    }
+
+    if (currentUser) {
+      this.validateUserOwner(user.userId, currentUser);
+    }
+
+    const isAdmin = currentUser ? this.isAdmin(currentUser) : true;
+
+    if (updateUserDto.email !== undefined) {
+      const newEmail = updateUserDto.email.trim().toLowerCase();
 
       const emailExists = await this.usersRepository.findOne({
-        where: {
-          email,
-          userId: Not(userId),
-          deletedAt: IsNull(),
-        },
+        where: { email: newEmail },
       });
 
-      if (emailExists) {
-        throw new BadRequestException('El correo ya está en uso');
+      if (emailExists && emailExists.userId !== userId) {
+        throw new ConflictException('El correo ya está registrado');
       }
 
-      user.email = email;
+      user.email = newEmail;
     }
 
-    if (updateUserDto.password && updateUserDto.password.trim() !== '') {
-      user.password = await bcrypt.hash(updateUserDto.password, SALT_ROUNDS);
+    if (updateUserDto.identificationNumber !== undefined) {
+      const newIdentificationNumber = this.normalizeIdentification(
+        updateUserDto.identificationNumber,
+      );
+
+      const identificationExists = await this.usersRepository.findOne({
+        where: { identificationNumber: newIdentificationNumber },
+      });
+
+      if (
+        identificationExists &&
+        identificationExists.userId !== userId
+      ) {
+        throw new ConflictException('La identificación ya está registrada');
+      }
+
+      user.identificationNumber = newIdentificationNumber;
     }
 
-    if (updateUserDto.number !== undefined) {
-      user.number = updateUserDto.number;
+    if (updateUserDto.identificationType !== undefined) {
+      user.identificationType = updateUserDto.identificationType;
     }
 
-    if (updateUserDto.rol !== undefined) {
-      user.rol = updateUserDto.rol;
+    if (updateUserDto.phone !== undefined) {
+      user.phone = updateUserDto.phone;
     }
 
-    if (updateUserDto.name !== undefined) {
-      user.name = updateUserDto.name;
+    if (updateUserDto.password !== undefined) {
+      user.passwordHash = await bcrypt.hash(updateUserDto.password, 10);
     }
 
-    if (updateUserDto.image !== undefined) {
-      user.image = updateUserDto.image;
+    if (updateUserDto.fullName !== undefined) {
+      user.fullName = updateUserDto.fullName.trim();
+    }
+
+    if (updateUserDto.profileImage !== undefined) {
+      user.profileImage = updateUserDto.profileImage;
+    }
+
+    if (updateUserDto.roles !== undefined) {
+      if (!isAdmin) {
+        throw new ForbiddenException(
+          'Solo un administrador puede cambiar los roles de un usuario',
+        );
+      }
+
+      user.roles = updateUserDto.roles;
     }
 
     if (updateUserDto.isVerified !== undefined) {
+      if (!isAdmin) {
+        throw new ForbiddenException(
+          'Solo un administrador puede verificar usuarios',
+        );
+      }
+
       user.isVerified = updateUserDto.isVerified;
     }
 
     if (updateUserDto.isActive !== undefined) {
+      if (!isAdmin) {
+        throw new ForbiddenException(
+          'Solo un administrador puede cambiar el estado del usuario',
+        );
+      }
+
       user.isActive = updateUserDto.isActive;
     }
 
     const updatedUser = await this.usersRepository.save(user);
 
-    return {
-      ok: true,
-      msg: 'Usuario actualizado correctamente',
-      user: this.sanitizeUser(updatedUser),
-    };
+    return this.toResponseDto(updatedUser);
   }
 
-  async softDelete(userId: number) {
+  async softDelete(
+    userId: number,
+    currentUser?: any,
+  ): Promise<{ message: string }> {
     const user = await this.findOneEntity(userId);
 
-    await this.usersRepository.softDelete(user.userId);
+    if (currentUser) {
+      this.validateUserOwner(user.userId, currentUser);
+    }
+
+    user.isActive = false;
+    await this.usersRepository.save(user);
+
+    await this.usersRepository.softDelete(userId);
 
     return {
-      ok: true,
-      msg: 'Usuario eliminado correctamente',
+      message: 'Usuario eliminado correctamente',
     };
   }
 
-  async restore(userId: number) {
+  async restore(
+    userId: number,
+    currentUser: any,
+  ): Promise<UserResponseDto> {
+    this.validateAdmin(currentUser);
+
     const user = await this.usersRepository.findOne({
-      where: { userId },
+      where: {
+        userId,
+      },
       withDeleted: true,
     });
 
@@ -196,39 +284,80 @@ export class UsersService {
       throw new NotFoundException('Usuario no encontrado');
     }
 
-    if (user.deletedAt === null) {
-      throw new BadRequestException('Este usuario no está eliminado');
+    if (!user.deletedAt) {
+      return this.toResponseDto(user);
     }
 
     await this.usersRepository.restore(userId);
 
-    const restoredUser = await this.findOneEntity(userId);
+    user.isActive = true;
+    user.deletedAt = null;
 
-    return {
-      ok: true,
-      msg: 'Usuario restaurado correctamente',
-      user: restoredUser,
-    };
+    const restoredUser = await this.usersRepository.save(user);
+
+    return this.toResponseDto(restoredUser);
   }
 
-  async findDeleted() {
-    const users = await this.usersRepository.find({
-      where: {
-        deletedAt: Not(IsNull()),
-      },
-      withDeleted: true,
-      order: {
-        userId: 'DESC',
-      },
-    });
+  async validatePassword(
+    email: string,
+    password: string,
+  ): Promise<User | null> {
+    const user = await this.findByEmailWithPassword(email);
 
-    return {
-      ok: true,
-      users,
-    };
+    if (!user) {
+      return null;
+    }
+
+    const isPasswordValid = await bcrypt.compare(
+      password,
+      user.passwordHash,
+    );
+
+    return isPasswordValid ? user : null;
   }
 
-  async saveUser(user: User) {
-    return this.usersRepository.save(user);
+  private normalizeIdentification(identificationNumber: string): string {
+    return identificationNumber.trim().toUpperCase().replace(/\s+/g, '');
+  }
+
+  private isAdmin(currentUser: any): boolean {
+    return currentUser?.roles?.includes(UserRole.ADMIN);
+  }
+
+  private validateAdmin(currentUser: any): void {
+    if (!this.isAdmin(currentUser)) {
+      throw new ForbiddenException(
+        'Solo un administrador puede realizar esta acción',
+      );
+    }
+  }
+
+  private validateUserOwner(userId: number, currentUser: any): void {
+    if (this.isAdmin(currentUser)) {
+      return;
+    }
+
+    if (userId !== currentUser.userId) {
+      throw new ForbiddenException(
+        'No puedes acceder o modificar una cuenta que no es tuya',
+      );
+    }
+  }
+
+  private toResponseDto(user: User): UserResponseDto {
+    return {
+      userId: user.userId,
+      email: user.email,
+      phone: user.phone,
+      identificationType: user.identificationType,
+      identificationNumber: user.identificationNumber,
+      roles: user.roles,
+      fullName: user.fullName,
+      profileImage: user.profileImage,
+      isVerified: user.isVerified,
+      isActive: user.isActive,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    };
   }
 }

@@ -1,12 +1,21 @@
 import {
+  ArrayNotEmpty,
+  IsArray,
   IsBoolean,
   IsEmail,
-  IsInt,
+  IsEnum,
+  IsNotEmpty,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
   MinLength,
 } from 'class-validator';
+
+import {
+  IdentificationType,
+  UserRole,
+} from '../../users/entities/user.entity';
 
 export class RegisterDto {
   @IsEmail({}, { message: 'El email no tiene un formato válido' })
@@ -14,26 +23,46 @@ export class RegisterDto {
   email!: string;
 
   @IsOptional()
-  @IsInt({ message: 'El número debe ser entero' })
-  number?: number;
+  @IsString()
+  @MaxLength(30)
+  phone?: string;
+
+  @IsOptional()
+  @IsEnum(IdentificationType, {
+    message: 'El tipo de identificación no es válido',
+  })
+  identificationType?: IdentificationType;
+
+  @IsString()
+  @IsNotEmpty({ message: 'La identificación es obligatoria' })
+  @MaxLength(50)
+  @Matches(/^[A-Za-z0-9-]+$/, {
+    message: 'La identificación solo puede contener letras, números y guiones',
+  })
+  identificationNumber!: string;
 
   @IsString()
   @MinLength(6, { message: 'La contraseña debe tener mínimo 6 caracteres' })
   @MaxLength(255)
   password!: string;
 
-  @IsString()
-  @MaxLength(255)
-  rol!: string;
+  @IsOptional()
+  @IsArray({ message: 'roles debe ser un arreglo' })
+  @ArrayNotEmpty({ message: 'Debe tener al menos un rol' })
+  @IsEnum(UserRole, {
+    each: true,
+    message: 'Los roles válidos son admin, client o worker',
+  })
+  roles?: UserRole[];
 
   @IsString()
-  @MaxLength(100)
-  name!: string;
+  @MaxLength(150)
+  fullName!: string;
 
   @IsOptional()
   @IsString()
   @MaxLength(255)
-  image?: string;
+  profileImage?: string;
 
   @IsOptional()
   @IsBoolean()

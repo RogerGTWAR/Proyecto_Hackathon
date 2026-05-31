@@ -5,10 +5,10 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { databaseConfig } from './config/database.config';
 import { UsersModule } from './modules/users/users.module';
 import { AuthModule } from './modules/auth/auth.module';
-import { ProvidersModule } from './modules/providers/providers.module';
-import { LocationsModule } from './modules/locations/locations.module';
-import { ProviderScheduleModule } from './modules/provider-schedule/provider-schedule.module';
+import { WorkersModule  } from './modules/workers/workers.module';
+import { WorkerScheduleModule } from './modules/worker-schedule/worker-schedule.module';
 import { FavoritesModule } from './modules/favorites/favorites.module';
+import { CaslModule } from './modules/casl/casl.module';
 
 @Module({
   imports: [
@@ -21,10 +21,10 @@ import { FavoritesModule } from './modules/favorites/favorites.module';
 
     UsersModule,
     AuthModule,
-    ProvidersModule,
-    LocationsModule,
-    ProviderScheduleModule,
+    WorkersModule,
+    WorkerScheduleModule,
     FavoritesModule,
+    CaslModule,
   ],
 })
 export class AppModule {}

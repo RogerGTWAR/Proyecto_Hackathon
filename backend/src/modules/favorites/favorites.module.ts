@@ -5,13 +5,15 @@ import { Favorite } from './entities/favorite.entity';
 import { FavoritesService } from './favorites.service';
 import { FavoritesController } from './favorites.controller';
 import { UsersModule } from '../users/users.module';
-import { ProvidersModule } from '../providers/providers.module';
+import { WorkersModule } from '../workers/workers.module';
+import { CaslModule } from '../casl/casl.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Favorite]),
     UsersModule,
-    ProvidersModule,
+    WorkersModule,
+    CaslModule,
   ],
   controllers: [FavoritesController],
   providers: [FavoritesService],

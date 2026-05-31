@@ -3,18 +3,33 @@ import {
   CreateDateColumn,
   DeleteDateColumn,
   Entity,
+  Index,
   OneToOne,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
 
-import { Provider } from '../../providers/entities/provider.entity';
+import { Worker } from '../../workers/entities/worker.entity';
+
+export enum IdentificationType {
+  CEDULA = 'cedula',
+  PASAPORTE = 'pasaporte',
+  RUC = 'ruc',
+  OTRO = 'otro',
+}
+
+export enum UserRole {
+  ADMIN = 'admin',
+  CLIENT = 'client',
+  WORKER = 'worker',
+}
 
 @Entity('users')
 export class User {
   @PrimaryGeneratedColumn({ name: 'user_id' })
   userId!: number;
 
+  @Index('idx_users_email')
   @Column({
     type: 'varchar',
     length: 255,
@@ -23,36 +38,62 @@ export class User {
   email!: string;
 
   @Column({
-    type: 'integer',
+    type: 'varchar',
+    length: 30,
     nullable: true,
   })
-  number!: number | null;
+  phone!: string | null;
 
   @Column({
+    name: 'identification_type',
+    type: 'varchar',
+    length: 50,
+    default: IdentificationType.CEDULA,
+  })
+  identificationType!: IdentificationType;
+
+  @Index('idx_users_identification_number')
+  @Column({
+    name: 'identification_number',
+    type: 'varchar',
+    length: 50,
+    unique: true,
+  })
+  identificationNumber!: string;
+
+  @Column({
+    name: 'password_hash',
     type: 'varchar',
     length: 255,
     select: false,
   })
-  password!: string;
+  passwordHash!: string;
 
+  @Index('idx_users_roles')
   @Column({
-    type: 'varchar',
-    length: 255,
+    name: 'roles',
+    type: 'enum',
+    enum: UserRole,
+    enumName: 'user_role_enum',
+    array: true,
+    default: [UserRole.CLIENT],
   })
-  rol!: string;
+  roles!: UserRole[];
 
   @Column({
+    name: 'full_name',
     type: 'varchar',
-    length: 100,
+    length: 150,
   })
-  name!: string;
+  fullName!: string;
 
   @Column({
+    name: 'profile_image',
     type: 'varchar',
     length: 255,
     nullable: true,
   })
-  image!: string | null;
+  profileImage!: string | null;
 
   @Column({
     name: 'is_verified',
@@ -87,6 +128,6 @@ export class User {
   })
   deletedAt!: Date | null;
 
-  @OneToOne(() => Provider, (provider) => provider.user)
-  provider!: Provider;
+  @OneToOne(() => Worker, (worker) => worker.user)
+  worker!: Worker;
 }
